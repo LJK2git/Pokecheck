@@ -7,91 +7,122 @@ DISCORD_WEBHOOK = "https://discordapp.com/api/webhooks/1495571407885832264/HFxOF
 DISCORD_ERROR_LOGS = False  # set to False to suppress error/not-found notifications on Discord
 
 # ─────────────────────────────────────────────
+# PRICE CHECKER CONFIG
+# Set a max price threshold per product name.
+# If the product is in stock AND at or below the
+# threshold, you get a special "price drop" alert.
+# Set to None to always notify regardless of price.
+# ─────────────────────────────────────────────
+PRICE_THRESHOLDS = {
+    "Test item":                                    None,
+    "Ascended Heros ETB":                           None,
+    "Ascended Heros Booster Bundle":                None,
+    "First collection":                             None,
+    "Prismatic":                                    None,
+    "Mega-Meganie-ex//Mega-Flambirex-ex//Mega-Impergator-ex": None,
+    "151 Booster bundle":                           None,
+}
+
+# ─────────────────────────────────────────────
 # GLOBAL PRODUCTS — edit this list to update
 # all stores at once. Each store's individual
 # "products" list (if set) overrides this.
 # ─────────────────────────────────────────────
 GLOBAL_PRODUCTS = [
-    #{"name": "Test item", "webcode": "13810253007"},
-    {"name": "Ascended Heros ETB", "webcode": "13810247007"},
-    {"name": "Ascended Heros Booster Bundle", "webcode": "13810257007"},    
-    {"name": "First collection", "webcode": "13810252007"},    
-    {"name": "Prismatic", "webcode": "13810157007"},
+    #{"name": "Test item",                                       "webcode": "13810147007"},
+    {"name": "Ascended Heros ETB",                              "webcode": "13810247007"},
+    {"name": "Ascended Heros Booster Bundle",                   "webcode": "13810257007"},
+    {"name": "First collection",                                "webcode": "13810252007"},
+    {"name": "Prismatic",                                       "webcode": "13810157007"},
     {"name": "Mega-Meganie-ex//Mega-Flambirex-ex//Mega-Impergator-ex", "webcode": "13810256007"},
-    {"name": "151 Booster bundle", "webcode": "13810206007"},
+    {"name": "151 Booster bundle",                              "webcode": "13810206007"},
 ]
 
 # ─────────────────────────────────────────────
 # STORES
-# storeId  → look for "assignStore" in network tab
-# webcode  → found in the product URL on expert.de
-#
-# To give a store its OWN product list (overrides
-# GLOBAL_PRODUCTS for that store), add a "products"
-# key as shown in the Freital example below.
-# Leave "products" out to use GLOBAL_PRODUCTS.
-#
-# Freital        e_26051723
-# Pirna          e_26051722
-# Freiberg       e_13193164
-# Bischofswerda  e_25254886
-# Potzsch 01609  e_1906928
-# Potzsch 04924  e_1907013
-# Potzsch 04910  e_1907041
-# Wunder         e_1907322
-# Bautzen        e_25254885
-# Sebnitz        e_31315790
 # ─────────────────────────────────────────────
 STORES = [
-    {
-        "storeId": "e_26051723",
-        "name": "Freital",
-    },
-    {
-        "storeId": "e_1906928",
-        "name": "Potzsch 01609",
-    },
-    {
-        "storeId": "e_1907013",
-        "name": "Potzsch 04924",
-    },
-    {
-        "storeId": "e_1907041",
-        "name": "Potzsch 04910",
-    },
-    {
-        "storeId": "e_31315790",
-        "name": "Sebnitz",
-    },
-    {
-        "storeId": "e_1907322",
-        "name": "Wunder",
-    },
-    {
-        "storeId": "e_26051722",
-        "name": "Pirna",
-    },
-    {
-        "storeId": "e_25254886",
-        "name": "Bischofswerda",
-    },
-    {
-        "storeId": "e_25254885",
-        "name": "Bautzen",
-    },
+    {"storeId": "e_26051723", "name": "Freital"},
+    {"storeId": "e_1906928",  "name": "Potzsch 01609"},
+    {"storeId": "e_1907013",  "name": "Potzsch 04924"},
+    {"storeId": "e_1907041",  "name": "Potzsch 04910"},
+    {"storeId": "e_31315790", "name": "Sebnitz"},
+    {"storeId": "e_1907322",  "name": "Wunder"},
+    {"storeId": "e_26051722", "name": "Pirna"},
+    {"storeId": "e_25254886", "name": "Bischofswerda"},
+    {"storeId": "e_25254885", "name": "Bautzen"},
 ]
 
 
-def send_discord_notification(store, product, stock):
+def get_price_from_data(data):
+    """Extract price from top-level promotionPrice, fall back to price.bruttoPrice."""
+    try:
+        promo = data.get("promotionPrice") or {}
+        for field in ("checkoutPrice", "afterCashbackPrice", "currentPrice"):
+            val = promo.get(field)
+            if val is not None:
+                return float(val)
+        # last resort: bruttoPrice inside price object
+        return float(data["price"]["bruttoPrice"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def format_price(price):
+    return f"€{price:.2f}" if price is not None else "unknown"
+
+
+def send_discord_notification(store, product, stock, price=None, price_dropped=False):
+    threshold = PRICE_THRESHOLDS.get(product["name"])
+    under_threshold = threshold is not None and price is not None and price <= threshold
+
+    if price_dropped:
+        title = "💸 PRICE DROP + IN STOCK!"
+        color = 15844367  # gold
+    elif under_threshold:
+        title = "🔥 GREAT PRICE + IN STOCK!"
+        color = 15105570  # orange
+    else:
+        title = "🎉 IN STOCK!"
+        color = 3066993   # green
+
+    fields = [
+        {"name": "Stock",  "value": str(stock),        "inline": True},
+        {"name": "Store",  "value": store["name"],      "inline": True},
+        {"name": "Price",  "value": format_price(price),"inline": True},
+    ]
+
+    if threshold is not None:
+        fields.append({"name": "Your Max Price", "value": format_price(threshold), "inline": True})
+
+    fields.append({
+        "name": "Link",
+        "value": "https://www.expert.de/shop/unsere-produkte/spielwaren-unterhaltung/spielfiguren-sammelkarten-fanartikel/pokemon-karten/",
+        "inline": False
+    })
+
     requests.post(DISCORD_WEBHOOK, json={
         "embeds": [{
-            "title": "🎉 IN STOCK!",
+            "title": title,
             "description": f"**{product['name']}** is available at **{store['name']}**",
-            "color": 3066993,
+            "color": color,
+            "fields": fields
+        }]
+    })
+
+
+def send_discord_price_change(store, product, old_price, new_price, stock):
+    """Send a Discord alert when price changes even if already notified as in-stock."""
+    requests.post(DISCORD_WEBHOOK, json={
+        "embeds": [{
+            "title": "📉 Price Changed!",
+            "description": f"**{product['name']}** price changed at **{store['name']}**",
+            "color": 3447003,  # blue
             "fields": [
-                {"name": "Stock",  "value": str(stock),    "inline": True},
-                {"name": "Store",  "value": store['name'], "inline": True},
-                {"name": "Link",   "value": "https://www.expert.de/shop/unsere-produkte/spielwaren-unterhaltung/spielfiguren-sammelkarten-fanartikel/pokemon-karten/"}
+                {"name": "Old Price", "value": format_price(old_price), "inline": True},
+                {"name": "New Price", "value": format_price(new_price), "inline": True},
+                {"name": "Stock",     "value": str(stock),              "inline": True},
+                {"name": "Store",     "value": store["name"],           "inline": True},
             ]
         }]
     })
@@ -106,8 +137,8 @@ def send_discord_error(store, product, error, raw=""):
             "fields": [
                 {"name": "Error",        "value": str(error)[:500],  "inline": False},
                 {"name": "Raw Response", "value": raw[:500] or "empty", "inline": False},
-                {"name": "Store ID",     "value": store['storeId'],  "inline": True},
-                {"name": "Webcode",      "value": product['webcode'], "inline": True},
+                {"name": "Store ID",     "value": store["storeId"],  "inline": True},
+                {"name": "Webcode",      "value": product["webcode"], "inline": True},
             ]
         }]
     })
@@ -158,6 +189,7 @@ for store in STORES:
     store["session"], store["headers"] = make_session(store["storeId"])
     store["in_stock_found"] = set()
     store["error_notified"] = set()
+    store["last_price"] = {}        # key → last seen price (tracks changes)
     print(f"   ✅ {store['name']} ({store['storeId']})")
 
 print(f"\n✅ All sessions ready, starting monitor...\n")
@@ -187,12 +219,31 @@ while True:
                 data = response.json()
                 availability = data["price"]["storeAvailability"]
                 stock = data["price"]["storeStock"]
+                price = get_price_from_data(data)
+
+                threshold = PRICE_THRESHOLDS.get(product["name"])
+                price_ok = threshold is None or (price is not None and price <= threshold)
+
+                # ── price change tracking (even when out of stock) ──
+                old_price = store["last_price"].get(key)
+                if price is not None:
+                    if old_price is not None and old_price != price:
+                        price_dropped = price < old_price
+                        change_str = f"↓ {format_price(old_price)} → {format_price(price)}" if price_dropped else f"↑ {format_price(old_price)} → {format_price(price)}"
+                        print(f"💰 [{store['name']}] [{product['name']}] Price changed: {change_str}")
+                        # only ping Discord for price changes when item is in stock
+                        if availability != "SOLD_OUT" and stock > 0:
+                            send_discord_price_change(store, product, old_price, price, stock)
+                    store["last_price"][key] = price
 
                 if availability == "SOLD_OUT" or stock == 0:
-                    print(f"❌ [{store['name']}] [{product['name']}] OUT OF STOCK (stock: {stock})")
+                    print(f"❌ [{store['name']}] [{product['name']}] OUT OF STOCK (stock: {stock}, price: {format_price(price)})")
+                elif not price_ok:
+                    print(f"⚠️  [{store['name']}] [{product['name']}] IN STOCK but price {format_price(price)} > threshold {format_price(threshold)} — skipping")
                 else:
-                    print(f"🎉 [{store['name']}] [{product['name']}] IN STOCK! Stock: {stock}")
-                    send_discord_notification(store, product, stock)
+                    price_dropped = old_price is not None and price is not None and price < old_price
+                    print(f"🎉 [{store['name']}] [{product['name']}] IN STOCK! Stock: {stock}, Price: {format_price(price)}")
+                    send_discord_notification(store, product, stock, price, price_dropped)
                     store["in_stock_found"].add(key)
 
             except Exception as e:
