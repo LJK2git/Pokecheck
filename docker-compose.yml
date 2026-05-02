@@ -1,0 +1,7 @@
+services:
+  pokemon:
+    container_name: pokemon
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./:/app
